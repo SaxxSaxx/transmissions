@@ -7,7 +7,16 @@ from datetime import datetime, timezone, timedelta
 FEED = "feed.log"
 README = "README.md"
 KEY = 0x5A
+INTRUDER_KEY = 0x37  # a different hand on the dial — won't decode with the station key
 WINDOW = 14  # transmissions shown in the README window
+
+INTRUDER_PHRASES = [
+    "you are not alone on this band",
+    "who is transmitting",
+    "we hear you too",
+    "leave the frequency",
+    "this band is ours",
+]
 
 PHRASES = [
     "stay quiet",
@@ -63,19 +72,39 @@ def rebuild_readme() -> None:
     open(README, "w").write(md)
 
 
+def is_intruder(dt: datetime) -> bool:
+    # roughly once a week, someone else keys the frequency
+    return hashlib.sha256((dt.strftime("%Y%m%d") + "x").encode()).digest()[0] % 7 == 0
+
+
+def intruder_line(dt: datetime) -> str:
+    h = hashlib.sha256((dt.strftime("%Y%m%d") + "intruder").encode()).digest()
+    phrase = INTRUDER_PHRASES[h[0] % len(INTRUDER_PHRASES)]
+    hexes = " ".join(f"{b ^ INTRUDER_KEY:02X}" for b in phrase.encode())
+    return f"{dt.strftime('%Y-%m-%dT%H:%MZ')}  ∎∎∎∎ ∷ {hexes}"
+
+
 def append(dt: datetime) -> None:
     with open(FEED, "a") as f:
         f.write(line_for(dt) + "\n")
+        if is_intruder(dt):
+            f.write(intruder_line(dt) + "\n")
 
 
 def main() -> None:
+    now = datetime.now(timezone.utc)
+    if len(sys.argv) > 1 and sys.argv[1] == "--intrude":
+        with open(FEED, "a") as f:
+            f.write(intruder_line(now) + "\n")
+        rebuild_readme()
+        return
     if len(sys.argv) > 2 and sys.argv[1] == "--backfill":
         n = int(sys.argv[2])
-        base = datetime.now(timezone.utc).replace(hour=3, minute=14, second=0, microsecond=0)
+        base = now.replace(hour=3, minute=14, second=0, microsecond=0)
         for d in range(n, 0, -1):
             append(base - timedelta(days=d))
     else:
-        append(datetime.now(timezone.utc))
+        append(now)
     rebuild_readme()
 
 
